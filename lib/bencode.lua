@@ -36,7 +36,7 @@ function bencode.decodeInteger(str)
   local s = str:gsub('i(-?%d+)e', function(n)
     result = n
     return ''
-  end)
+  end, 1)
   return tonumber(result), str:sub(3 + result:len())
 end
 

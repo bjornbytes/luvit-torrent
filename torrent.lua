@@ -1,1 +1,1 @@
-local bencode = require './lib/bencode'
+return require './lib/torrent'
