@@ -1,6 +1,5 @@
 local Torrent = require('./torrent')
 
-
 -- Place a torrent named sample.torrent in the same directory
 -- as this file.
 -- Parse its metainfo with:

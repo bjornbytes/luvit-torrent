@@ -1,3 +1,5 @@
+local orderedPairs = require('./util').orderedPairs
+
 local bencode = {}
 
 function bencode.decode(str)
@@ -47,6 +49,38 @@ function bencode.decodeString(str)
     return ''
   end, 1)
   return s:sub(1, len), s:sub(len+1)
+end
+
+function bencode.encode(x)
+  if type(x) == 'table' then
+    if type(next(x)) == 'number' then return bencode.encodeList(x)
+    elseif type(next(x)) == 'string' then return bencode.encodeDictionary(x) end
+  elseif type(x) == 'number' then return bencode.encodeInteger(x)
+  elseif type(x) == 'string' then return bencode.encodeString(x) end
+end
+
+function bencode.encodeList(list)
+  local str = 'l'
+  for _, v in ipairs(list) do
+    str = str .. bencode.encode(v)
+  end
+  return str .. 'e'
+end
+
+function bencode.encodeDictionary(dict)
+  local str = 'd'
+  for k, v in orderedPairs(dict) do
+    str = str .. bencode.encodeString(k) .. bencode.encode(v)
+  end
+  return str .. 'e'
+end
+
+function bencode.encodeInteger(int)
+  return 'i' .. int .. 'e'
+end
+
+function bencode.encodeString(str)
+  return str:len() .. ':' .. str
 end
 
 return bencode
