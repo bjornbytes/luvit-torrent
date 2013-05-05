@@ -7,8 +7,5 @@ local Torrent = require('./torrent')
 -- We are not outputting the info dictionary because it
 -- contains a large amount of binary data.
 local t = Torrent:new('sample.torrent')
-t:readMetainfo(function()
-  for k, v in pairs(t.metainfo) do
-    print(k, v)
-  end
-end)
+t:start()
+

@@ -1,9 +1,12 @@
 local math = require('math')
 local os = require('os')
+local table = require('table')
+
 local bencode = require('./bencode')
 local listen = require('./listen')
 local fs = require('fs')
 local http = require('http')
+local sha1 = require('./sha1')
 
 local Object = require('core').Object
 local Tracker = require('./tracker')
@@ -18,7 +21,6 @@ function Torrent:initialize(location)
   math.randomseed(os.time())
   self.location = location
   self.peerId = '-Lv0010-' .. math.random(1e11, 9e11)
-  print(self.peerId)
 end
 
 
@@ -38,22 +40,21 @@ end
 function Torrent:readMetainfo(callback)
   if self.metainfo then return nil end
   
+  local function parse(data)
+    self.metainfo = bencode.decode(data)
+    self.infoHash = sha1.hash(bencode.encode(self.metainfo.info))
+    if callback then callback() end
+  end
+  
   if self.location.sub(1,4) == 'http' then
     http.get(url, function(res)
       local data = ''
 
-      res.setEncoding('utf8')
-      res.on('data', function(chunk) data = data .. chunk end)
-      res.on('end', function()
-        self.metainfo = bencode.decode(data)
-        if callback then callback() end
-      end)
+      res:on('data', function(chunk) data = data .. chunk end)
+      res:on('end', function() parse(data) end)
     end)
   else
-    fs.readFile(self.location, function(err, data)
-      self.metainfo = bencode.decode(data)
-      if callback then callback() end
-    end)
+    fs.readFile(self.location, function(err, data) parse(data) end)
   end
 end
 
@@ -62,20 +63,34 @@ end
 -- portions of the metainfo dictionary.
 function Torrent:initTrackers()
   if self.trackers then return nil end
+  
   self.trackers = {}
+  
+  if self.metainfo.announce then
+    table.insert(self.trackers, Tracker:new(self.metainfo.announce))
+  end
+  
+  if self.metainfo.announceList then
+    for _, v in ipairs(self.metainfo.announceList) do
+      table.insert(self.trackers, Tracker:new(v))
+    end
+  end
 end
 
 
 -- Starts or resumes the torrent.
 function Torrent:start()
   -- This will have to be restructured for asynchronousness.
-  if not self.metainfo then self:readMetainfo() end
-  if not self.trackers then self:initTrackers() end
-  
-  announceHandler = function(peers) print('found ' .. #peers .. ' peers') end
-  
-  for _, tracker in pairs(self.trackers) do
-    self:announce(tracker, 'started', announceHandler)
+  if not self.metainfo then
+    self:readMetainfo(function()
+      if not self.trackers then self:initTrackers() end
+      
+      announceHandler = function(peers) print('found ' .. #peers .. ' peers') end
+      
+      for _, tracker in pairs(self.trackers) do
+        self:announce(tracker, 'started', announceHandler)
+      end
+    end)
   end
 end
 
@@ -91,17 +106,19 @@ end
 -- or "completed").  After the announce is complete, callback is
 -- executed with the parsed response.
 function Torrent:announce(tracker, event, callback)
-  local options = {
-    infoHash = self.metainfo.info,
-    peerId = self.peerId,
-    port = listen:getPortSync(),
-    uploaded = 0,
-    downloaded = 0,
-    left = self.metainfo.info.length,
-    event = event
-  }
-  
-  tracker:announce(options, callback)
+  listen:getPort(function(port)
+    local options = {
+      infoHash = self.infoHash,
+      peerId = self.peerId,
+      port = port,
+      uploaded = 0,
+      downloaded = 0,
+      left = self.metainfo.info.length,
+      event = event
+    }
+    
+    tracker:announce(options, callback)
+  end)
 end
 
 

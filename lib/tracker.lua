@@ -1,5 +1,8 @@
+local string = require('string')
+local table = require('table')
+
 local bencode = require('./bencode')
-local querystring = require('querystring')
+local http = require('http')
 
 local Object = require('core').Object
 local Peer = require('./peer')
@@ -15,10 +18,34 @@ function Tracker:announce(options, callback)
       or not options.uploaded or not options.downloaded or not options.left then
     return nil
   end
+
+  local function urlEncodeHex(str)
+    return str:gsub('(%w%w)', function(x)
+      local b = tonumber(x, 16)
+      if (b >= 48 and b <= 57) or (b >= 65 and b <= 90) or (b >= 97 and b <= 122)
+          or b == 45 or b == 95 or b == 46 or b == 126 then
+        return string.char(b)
+      else
+        return '%' .. x
+      end
+    end)
+  end
+  
+  local function urlEncode(str)
+    return str:gsub('(.)', function(x)
+      local b = x:byte(1)
+      if (b >= 48 and b <= 57) or (b >= 65 and b <= 90) or (b >= 97 and b <= 122)
+          or b == 45 or b == 95 or b == 46 or b == 126 then
+        return x
+      else
+        return string.format('%%%x', b)
+      end
+    end)
+  end
   
   local url = self.url
-  url = url .. '?info_hash=' .. querystring.urlencode(options.infoHash)
-  url = url .. '&peer_id=' .. querystring.urlencode(options.peerId)
+  url = url .. '?info_hash=' .. urlEncodeHex(options.infoHash)
+  url = url .. '&peer_id=' .. urlEncode(options.peerId)
   url = url .. '&port=' .. options.port
   url = url .. '&uploaded=' .. options.uploaded
   url = url .. '&downloaded=' .. options.downloaded
@@ -26,13 +53,15 @@ function Tracker:announce(options, callback)
   if options.event then
     url = url .. '&event=' .. options.event
   end
+  url = url .. '&compact=1'
+  
+  print('announce url: ' .. url)
   
   http.get(url, function(res)
     local data = ''
     
-    res.setEncoding('utf8')
-    res.on('data', function(chunk) data = data .. chunk end)
-    res.on('end', function()
+    res:on('data', function(chunk) data = data .. chunk end)
+    res:on('end', function()
       peers = {}
       
       local response = bencode.decode(data)
@@ -46,7 +75,7 @@ function Tracker:announce(options, callback)
       local rawPeers = response['peers']
       
       if type(rawPeers) == 'string' then
-        while rawPeers do
+        while #rawPeers > 0 do
           local str = rawPeers:sub(1, 6)
           
           local ip = str:sub(1, 4):gsub('(.)', function(x)
@@ -54,8 +83,9 @@ function Tracker:announce(options, callback)
           end):sub(0, -2)
           
           local x, y = str:byte(5,6)
-          local port = (y * 256) + x
+          local port = (x * 256) + y
           
+          print('creating peer ' .. ip .. ':' .. port)
           table.insert(peers, Peer:new(ip, port))
           
           rawPeers = rawPeers:sub(7)
