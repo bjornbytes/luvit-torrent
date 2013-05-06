@@ -8,4 +8,3 @@ local Torrent = require('./torrent')
 -- contains a large amount of binary data.
 local t = Torrent:new('sample.torrent')
 t:start()
-

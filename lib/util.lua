@@ -1,9 +1,10 @@
 local util = {}
 
-
--- orderedPairs
+local string = require('string')
 local table = require('table')
 
+
+-- orderedPairs
 local function __genOrderedIndex(t)
   local orderedIndex = {}
   for key in pairs(t) do
@@ -43,5 +44,16 @@ local function orderedNext(t, state)
 end
 
 function util.orderedPairs(t) return orderedNext, t, nil end
+
+
+-- Reading big-endian numbers.
+-- See http://lua-users.org/wiki/ReadWriteFormat
+function util.readInt(str)
+  local function _b2n(num, digit, ...)
+    if not digit then return num end
+    return _b2n(num*256 + digit, ...)
+  end
+  return _b2n(0, string.byte(str, 1, -1))
+end
 
 return util

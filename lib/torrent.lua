@@ -1,6 +1,7 @@
 local math = require('math')
 local os = require('os')
 local table = require('table')
+local string = require('string')
 
 local bencode = require('./bencode')
 local listen = require('./listen')
@@ -42,7 +43,9 @@ function Torrent:readMetainfo(callback)
   
   local function parse(data)
     self.metainfo = bencode.decode(data)
-    self.infoHash = sha1.hash(bencode.encode(self.metainfo.info))
+    self.infoHash = sha1.hash(bencode.encode(self.metainfo.info)):gsub('(%w%w)', function(x)
+      return string.char(tonumber(x, 16))
+    end)
     if callback then callback() end
   end
   
@@ -85,7 +88,12 @@ function Torrent:start()
     self:readMetainfo(function()
       if not self.trackers then self:initTrackers() end
       
-      announceHandler = function(peers) print('found ' .. #peers .. ' peers') end
+      announceHandler = function(peers)
+        print('found ' .. #peers .. ' peers')
+        for _, peer in ipairs(peers) do
+          peer:connect('BitTorrent protocol', self.infoHash, self.peerId)
+        end
+      end
       
       for _, tracker in pairs(self.trackers) do
         self:announce(tracker, 'started', announceHandler)
