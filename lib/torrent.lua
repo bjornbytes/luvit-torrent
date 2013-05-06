@@ -22,6 +22,7 @@ function Torrent:initialize(location)
   math.randomseed(os.time())
   self.location = location
   self.peerId = '-Lv0010-' .. math.random(1e11, 9e11)
+  self.peers = {}
 end
 
 
@@ -89,9 +90,14 @@ function Torrent:start()
       if not self.trackers then self:initTrackers() end
       
       announceHandler = function(peers)
-        print('found ' .. #peers .. ' peers')
         for _, peer in ipairs(peers) do
+          table.insert(self.peers, peer)
+          
           peer:connect('BitTorrent protocol', self.infoHash, self.peerId)
+          
+          peer:on('message', function(id, ...)
+            print('Received message ' .. id)
+          end)
         end
       end
       

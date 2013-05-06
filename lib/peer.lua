@@ -1,3 +1,5 @@
+local table = require('table')
+
 local net = require('net')
 
 local readInt = require('./util').readInt
@@ -12,6 +14,12 @@ function Peer:initialize(ip, port)
   self.port = port
   self.authenticated = false
   self.buffer = ''
+  
+  -- In relation to the remote peer.
+  self.choked = true
+  self.choking = true
+  self.interesting = false
+  self.interested = false
 end
 
 function Peer:destroy()
@@ -94,10 +102,8 @@ function Peer:connect(protocol, infoHash, peerId)
   self.connection:on('data', function(data)
     if self.authenticated then
       
-      if #data == 0 then
-        print('Keepalive')
-        return
-      end
+      -- Keepalives.
+      if #data == 0 then return end
       
       -- We work on a local copy of self.buffer .. data.
       -- Then we continually parse messages on this copy.
@@ -112,7 +118,7 @@ function Peer:connect(protocol, infoHash, peerId)
           break
         end
         
-        local len = readInt(str:sub(1,4))
+        local len = readInt(str:sub(1, 4))
         if #str < 4 + len then
           self.buffer = str
           break
@@ -120,19 +126,26 @@ function Peer:connect(protocol, infoHash, peerId)
         
         local id = str:byte(5)
         
-        if id == 0 then
-          print('Received MSG_CHOKE.')
-        elseif id == 1 then
-          print('Received MSG_UNCHOKE.')
-        elseif id == 2 then
-          print('Received MSG_INTERESTED.')
-        elseif id == 3 then
-          print('Received MSG_UNINTERESTED.')
-        elseif id == 4 then
-          print('Received MSG_HAVE.')
-        elseif id == 5 then
-          print('Received MSG_BITFIELD.')
-        end
+        -- Payload is either a single value or a table of values.
+        local payload = {}
+        
+        if id == 4 then table.insert(payload, readInt(str:sub(6, 9)))
+        elseif id == 5 then table.insert(payload, str:sub(6, 6 + len - 1))
+        elseif id == 6 then
+          table.insert(payload, readInt(str:sub(6, 9)))
+          table.insert(payload, readInt(str:sub(10, 13)))
+          table.insert(payload, readInt(str:sub(14, 17)))
+        elseif id == 7 then
+          table.insert(payload, readInt(str:sub(6, 9)))
+          table.insert(payload, readInt(str:sub(10, 13)))
+          table.insert(payload, str:sub(14))
+        elseif id == 8 then
+            table.insert(payload, readInt(str:sub(6, 9)))
+            table.insert(payload, readInt(str:sub(10, 13)))
+            table.insert(payload, readInt(str:sub(14, 17)))
+        elseif id == 9 then table.insert(payload, readInt(str:sub(6,7))) end
+        
+        self:emit('message', id, unpack(payload))
         
         str = str:sub(4 + len + 1)
       end
