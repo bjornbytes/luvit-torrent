@@ -129,8 +129,17 @@ function Peer:connect(protocol, infoHash, peerId)
         -- Payload is either a single value or a table of values.
         local payload = {}
         
-        if id == 4 then table.insert(payload, readInt(str:sub(6, 9)))
-        elseif id == 5 then table.insert(payload, str:sub(6, 6 + len - 1))
+        -- Peer housekeeping goes in here.  Higher level logic is in torrent.lua.
+        if id == 0 then self.choking = true
+        elseif id == 1 then self.choking = false
+        elseif id == 2 then self.interested = true
+        elseif id == 3 then self.interested = false
+        elseif id == 4 then
+          table.insert(payload, readInt(str:sub(6, 9)))
+          -- Update bitfield
+        elseif id == 5 then
+          table.insert(payload, str:sub(6, 6 + len - 1))
+          -- Update bitfield
         elseif id == 6 then
           table.insert(payload, readInt(str:sub(6, 9)))
           table.insert(payload, readInt(str:sub(10, 13)))
@@ -138,12 +147,12 @@ function Peer:connect(protocol, infoHash, peerId)
         elseif id == 7 then
           table.insert(payload, readInt(str:sub(6, 9)))
           table.insert(payload, readInt(str:sub(10, 13)))
-          table.insert(payload, str:sub(14))
+          table.insert(payload, str:sub(14, 14 + len - 10))
         elseif id == 8 then
             table.insert(payload, readInt(str:sub(6, 9)))
             table.insert(payload, readInt(str:sub(10, 13)))
             table.insert(payload, readInt(str:sub(14, 17)))
-        elseif id == 9 then table.insert(payload, readInt(str:sub(6,7))) end
+        elseif id == 9 then table.insert(payload, readInt(str:sub(6, 7))) end
         
         self:emit('message', id, unpack(payload))
         

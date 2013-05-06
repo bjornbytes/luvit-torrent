@@ -82,6 +82,51 @@ function Torrent:initTrackers()
 end
 
 
+-- High-level message.  Lower level logic is in peer.lua.
+-- A poor man's switch statement.
+local messageHandler = {
+  [0] = function(peer)
+    --
+  end,
+  
+  [1] = function(peer)
+    --
+  end,
+  
+  [2] = function(peer)
+    --
+  end,
+  
+  [3] = function(peer)
+    --
+  end,
+  
+  [4] = function(peer, piece)
+    --
+  end,
+  
+  [5] = function(peer, bitfield)
+    print('Bitfield')
+  end,
+  
+  [6] = function(peer, piece, offset, length)
+    --
+  end,
+  
+  [7] = function(peer, piece, offset, body)
+    --
+  end,
+  
+  [8] = function(peer, piece, offset, length)
+    --
+  end,
+  
+  [9] = function(peer, port)
+    --
+  end
+}
+
+
 -- Starts or resumes the torrent.
 function Torrent:start()
   -- This will have to be restructured for asynchronousness.
@@ -96,7 +141,7 @@ function Torrent:start()
           peer:connect('BitTorrent protocol', self.infoHash, self.peerId)
           
           peer:on('message', function(id, ...)
-            print('Received message ' .. id)
+            messageHandler[id](peer, ...)
           end)
         end
       end
