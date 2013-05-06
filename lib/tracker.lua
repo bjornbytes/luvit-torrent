@@ -43,8 +43,6 @@ function Tracker:announce(options, callback)
   end
   url = url .. '&compact=1'
   
-  print('announce url: ' .. url)
-  
   http.get(url, function(res)
     local data = ''
     
@@ -74,7 +72,7 @@ function Tracker:announce(options, callback)
           local x, y = str:byte(5,6)
           local port = (x * 256) + y
           
-          table.insert(peers, Peer:new(ip, port))
+          table.insert(peers, Peer:new(ip, port, options.pieces))
           
           rawPeers = rawPeers:sub(7)
         end

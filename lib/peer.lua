@@ -1,4 +1,5 @@
 local table = require('table')
+local math = require('math')
 
 local net = require('net')
 
@@ -9,7 +10,7 @@ local buffer = require('buffer')
 
 local Peer = Emitter:extend()
 
-function Peer:initialize(ip, port)
+function Peer:initialize(ip, port, pieceCount)
   self.ip = ip
   self.port = port
   self.authenticated = false
@@ -20,6 +21,27 @@ function Peer:initialize(ip, port)
   self.choking = true
   self.interesting = false
   self.interested = false
+  
+  -- Bitfield representing which pieces this peer has.
+  self.pieces = {}
+  local i
+  for i = 1, pieceCount do
+    self.pieces[i] = 0
+  end
+  
+  -- Pieces they have asked us for.
+  self.want = {}
+  
+  -- Pieces we would like to ask them for.
+  self.requests = {}
+  
+  -- A list containing pieces which we have requested, but haven't received.
+  self.pending = {}
+  
+  -- A list of the amount of bytes we have downloaded/uploaded from/to this peer
+  -- In the past few seconds.
+  self.dnRate = {}
+  self.upRate = {}
 end
 
 function Peer:destroy()
@@ -28,8 +50,6 @@ end
 
 function Peer:connect(protocol, infoHash, peerId)
   if self.authenticated then return end
-  
-  print('Trying to connect to ' .. self.ip .. ':' .. self.port)
   
   self.connection = net.createConnection(self.port, self.ip, function()
 
@@ -135,11 +155,25 @@ function Peer:connect(protocol, infoHash, peerId)
         elseif id == 2 then self.interested = true
         elseif id == 3 then self.interested = false
         elseif id == 4 then
-          table.insert(payload, readInt(str:sub(6, 9)))
-          -- Update bitfield
+          local piece = readInt(str:sub(6, 9))
+          table.insert(payload, piece)
+          self.pieces[piece] = 1
         elseif id == 5 then
-          table.insert(payload, str:sub(6, 6 + len - 1))
-          -- Update bitfield
+          local bitfield = str:sub(6, 6 + len - 1)
+
+          table.insert(payload, bitfield)
+          local j, i = 1
+          for i = 1, #bitfield do
+            local b = bitfield:byte(i)
+            local k = 7
+            while b > 0 and j < #self.pieces do
+              local rem = b % 2
+              self.pieces[j + k] = rem
+              j = j + 1
+              k = k - 1
+              b = math.floor(b / 2)
+            end
+          end
         elseif id == 6 then
           table.insert(payload, readInt(str:sub(6, 9)))
           table.insert(payload, readInt(str:sub(10, 13)))

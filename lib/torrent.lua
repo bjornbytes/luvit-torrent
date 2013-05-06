@@ -8,6 +8,7 @@ local listen = require('./listen')
 local fs = require('fs')
 local http = require('http')
 local sha1 = require('./sha1')
+local util = require('./util')
 
 local Object = require('core').Object
 local Tracker = require('./tracker')
@@ -86,43 +87,55 @@ end
 -- A poor man's switch statement.
 local messageHandler = {
   [0] = function(peer)
-    --
+  
+    -- If they choke us and we've requested pieces, put these requests back in the pool.
+    while #peer.pending do
+      local req = peer.pending[1]
+      table.remove(peer.pending, 1)
+      table.insert(peer.requests, req)
+    end
   end,
   
   [1] = function(peer)
-    --
+  
+    -- After someone unchokes us, start pipelining block requests.
+    while #peer.pending < 4 and #peer.requests > 0 do
+      local req = peer.requests[1]
+      table.remove(peer.requests, 1)
+      table.insert(peer.pending, piece)
+      
+      -- Send a request message.
+    end
   end,
   
   [2] = function(peer)
-    --
+    -- Unchoke them if possible.
   end,
   
   [3] = function(peer)
-    --
+    -- Choke them if possible
   end,
   
   [4] = function(peer, piece)
-    --
+    -- Update datastructures, decide if you want to ask them for this piece.
   end,
   
   [5] = function(peer, bitfield)
-    print('Bitfield')
+    -- Handled by Peer.
   end,
   
   [6] = function(peer, piece, offset, length)
-    --
+    -- See if we have the piece and if we're able to serve the piece.
+    -- If we want to serve them the piece, then unchoke them (if not already).
+    -- Add these details to peer.want.
   end,
   
   [7] = function(peer, piece, offset, body)
-    --
+    -- They are sending us a block.  Save the block.
   end,
   
   [8] = function(peer, piece, offset, length)
-    --
-  end,
-  
-  [9] = function(peer, port)
-    --
+    -- Remove the block from their want list.
   end
 }
 
@@ -173,7 +186,8 @@ function Torrent:announce(tracker, event, callback)
       uploaded = 0,
       downloaded = 0,
       left = self.metainfo.info.length,
-      event = event
+      event = event,
+      pieces = math.ceil(self.metainfo.info.length / self.metainfo.info['piece length'])
     }
     
     tracker:announce(options, callback)

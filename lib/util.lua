@@ -56,4 +56,13 @@ function util.readInt(str)
   return _b2n(0, string.byte(str, 1, -1))
 end
 
+function util.writeInt(num, width)
+  local function _n2b(t, width, num, rem)
+    if width == 0 then return table.concat(t) end
+    table.insert(t, 1, string.char(rem * 256))
+    return _n2b(t, width-1, math.modf(num/256))
+  end
+  return _n2b({}, width, math.modf(num/256))
+end
+
 return util
