@@ -7,7 +7,6 @@ function Request:new(options)
   self.block = options.block
   self.length = options.length
   self.peer = options.peer
-  self.time = options.time
 end
 
 return Request

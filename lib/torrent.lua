@@ -28,13 +28,13 @@ function Torrent:initialize(location)
   self.peerId = '-Lv0010-' .. math.random(1e11, 9e11)
   self.peers = nil
   
-  self.missing = nil
-  self.rarity = nil
+  self.missing = {}
+  self.rarity = {}
   
-  self.uploadQueue = nil
-  self.downloadQueue = nil
-  self.unchokeQueue = nil
-  self.interestedQueue = nil
+  self.uploadQueue = {}
+  self.downloadQueue = {}
+  self.unchokeQueue = {}
+  self.interestedQueue = {}
   
   self.content = nil
 end
@@ -102,6 +102,8 @@ local messageHandler = {
   MSG_CHOKE = function(peer)
   
     -- If they choke us and we've requested pieces, put these requests back in the pool.
+    -- We don't put them back in peer.want because we're going to ask someone else for them
+    -- instead.
     while #peer.pending do
       local req = peer.pending[1]
       table.remove(peer.pending, 1)
@@ -112,32 +114,24 @@ local messageHandler = {
   MSG_UNCHOKE = function(peer)
   
     -- After someone unchokes us, start pipelining block requests.
-    for i = 1, #self.interestedQueue[peer].pieces do
-      local piece = self.interestedQueue[peer].pieces[i]
-      if self.missing[piece] and #self.missing[piece] > 0 then
-        local j
-        for j = 1, #self.missing[piece] do
-          table.insert(self.downloadQueue, Request:new({
-            piece = piece,
-            block = self.missing[piece][j],
-            length = 16384,
-            peer = peer.id,
-          }))
-        end
-      end
+    for i = 1, #peer.want do
+      local req = peer.want[i]
+      table.insert(self.downloadQueue, Request:new({
+        piece = req.piece,
+        block = req.block,
+        length = req.length,
+        peer = peer.id
+      }))
     end
   end,
   
   MSG_INTERESTED = function(peer)
     local i
     for i = 1, #self.unchokeQueue do
-      if self.unchokeQueue[i].peerId == peer.id then return end
+      if self.unchokeQueue[i] == peer.id then return end
     end
     
-    table.insert(self.unchokeQueue[i], {
-      id = peer.id,
-      pieces = {}
-    })
+    table.insert(self.unchokeQueue[i], peer.id)
   end,
   
   MSG_UNINTERESTED = function(peer)
@@ -149,14 +143,29 @@ local messageHandler = {
         i = i - 1
       end
     end
+    
+    for i = 1, #self.unchokeQueue do
+      if self.unchokeQueue[i] == peer.id then table.remove(self.unchokeQueue, i) return end
+    end
   end,
   
   MSG_HAVE = function(peer, piece)
     self.rarity[piece] = self.rarity[piece] + 1
     
-    if (not peer.interesting) and self.missing[piece] and #self.missing[piece] > 0 then
-      peer.interesting = true
-      peer:send(MSG_INTERESTED)
+    if self.missing[piece] and #self.missing[piece] > 0 then
+      
+      -- Assume that we'll eventually get all blocks for this piece from this peer
+      -- Probably won't happen in practice -- we'll put the blocks we don't get back into
+      -- self.missing
+      local j
+      for j = 1, #self.missing[piece] do
+        table.insert(peer.want, Request:new({
+          piece = piece,
+          block = j,
+          length = 16384
+        })
+        table.remove(self.missing[piece][j])
+      end
     end
   end,
   
@@ -171,8 +180,7 @@ local messageHandler = {
         piece = piece,
         block = block,
         length = length,
-        peer = peer,
-        time = os.time()
+        peer = peer
       }))
     end
   end,

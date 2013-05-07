@@ -30,6 +30,9 @@ function Peer:initialize(ip, port, pieceCount)
     self.pieces[i] = 0
   end
   
+  -- A list containing requests which we will ask the peer for if they unchoke us.
+  self.want = {}
+  
   -- A list containing blocks which we have requested, but haven't received.
   self.pending = {}
 end
