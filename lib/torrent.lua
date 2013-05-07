@@ -10,6 +10,8 @@ local http = require('http')
 local sha1 = require('./sha1')
 local util = require('./util')
 
+require('./constants')
+
 local Object = require('core').Object
 local Tracker = require('./tracker')
 local Request = require('./request')
@@ -97,7 +99,7 @@ end
 -- High-level message logic.  Lower level logic is in peer.lua.
 -- A poor man's switch statement.
 local messageHandler = {
-  [0] = function(peer)
+  MSG_CHOKE = function(peer)
   
     -- If they choke us and we've requested pieces, put these requests back in the pool.
     while #peer.pending do
@@ -107,7 +109,7 @@ local messageHandler = {
     end
   end,
   
-  [1] = function(peer)
+  MSG_UNCHOKE = function(peer)
   
     -- After someone unchokes us, start pipelining block requests.
     for i = 1, #self.interestedQueue[peer].pieces do
@@ -126,16 +128,19 @@ local messageHandler = {
     end
   end,
   
-  [2] = function(peer)
+  MSG_INTERESTED = function(peer)
     local i
     for i = 1, #self.unchokeQueue do
       if self.unchokeQueue[i].peerId == peer.id then return end
     end
     
-    table.insert(self.unchokeQueue[i], peer.id)
+    table.insert(self.unchokeQueue[i], {
+      id = peer.id,
+      pieces = {}
+    })
   end,
   
-  [3] = function(peer)
+  MSG_UNINTERESTED = function(peer)
     local i
     for i = 1, #self.uploadQueue do
       local req = self.uploadQueue[i]
@@ -146,20 +151,20 @@ local messageHandler = {
     end
   end,
   
-  [4] = function(peer, piece)
+  MSG_HAVE = function(peer, piece)
     self.rarity[piece] = self.rarity[piece] + 1
     
     if (not peer.interesting) and self.missing[piece] and #self.missing[piece] > 0 then
       peer.interesting = true
-      peer:send(2)
+      peer:send(MSG_INTERESTED)
     end
   end,
   
-  [5] = function(peer, bitfield)
+  MSG_BITFIELD = function(peer, bitfield)
     -- Update rarity.
   end,
   
-  [6] = function(peer, piece, offset, length)
+  MSG_REQUEST = function(peer, piece, offset, length)
     local block = math.floor(offset / 16384)
     if not self.missing[piece] then
       table.insert(self.uploadQueue, Request:new({
@@ -172,7 +177,7 @@ local messageHandler = {
     end
   end,
   
-  [7] = function(peer, piece, offset, body)
+  MSG_PIECE = function(peer, piece, offset, body)
     -- TODO Write body to content cache.
     -- TODO Check if it completes a piece.  Do a bunch of work if it does.
     
@@ -190,7 +195,7 @@ local messageHandler = {
       for i = 1, #self.downloadQueue do
         if self.downloadQueue[i].peer == peer.id then
           peer.interesting = false
-          peer:send(3)
+          peer:send(MSG_UNINTERESTED)
         end
       end
     end
@@ -207,12 +212,15 @@ function Torrent:start()
       if not self.peers then self.peers = {} end
       
       announceHandler = function(peers)
+        print('pls')
         for _, peer in ipairs(peers) do
-          table.insert(self.peers, peer)
-          
           peer:connect('BitTorrent protocol', self.infoHash, self.peerId)
           
+          peer:on('handshake', function(id)
+            self.peers[id] = peer
+          end)
           peer:on('message', function(id, ...)
+            print('Received ' .. id)
             messageHandler[id](peer, ...)
           end)
         end

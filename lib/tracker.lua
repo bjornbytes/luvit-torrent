@@ -43,6 +43,8 @@ function Tracker:announce(options, callback)
   end
   url = url .. '&compact=1'
   
+  print('Announcing to ' .. url)
+  
   http.get(url, function(res)
     local data = ''
     
