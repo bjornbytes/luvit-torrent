@@ -94,7 +94,7 @@ function Torrent:initTrackers()
 end
 
 
--- High-level message.  Lower level logic is in peer.lua.
+-- High-level message logic.  Lower level logic is in peer.lua.
 -- A poor man's switch statement.
 local messageHandler = {
   [0] = function(peer)
@@ -111,8 +111,8 @@ local messageHandler = {
   
     -- After someone unchokes us, start pipelining block requests.
     for i = 1, #self.interestedQueue[peer].pieces do
-      local piece = self.interestedQueue[peer].piece[i]
-      if self.missing[piece] and #self.missing[piece] then
+      local piece = self.interestedQueue[peer].pieces[i]
+      if self.missing[piece] and #self.missing[piece] > 0 then
         local j
         for j = 1, #self.missing[piece] do
           table.insert(self.downloadQueue, Request:new({
