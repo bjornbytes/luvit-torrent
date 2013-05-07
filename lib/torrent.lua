@@ -12,6 +12,7 @@ local util = require('./util')
 
 local Object = require('core').Object
 local Tracker = require('./tracker')
+local Request = require('./request')
 
 local Torrent = Object:extend()
 
@@ -23,7 +24,17 @@ function Torrent:initialize(location)
   math.randomseed(os.time())
   self.location = location
   self.peerId = '-Lv0010-' .. math.random(1e11, 9e11)
-  self.peers = {}
+  self.peers = nil
+  
+  self.missing = nil
+  self.rarity = nil
+  
+  self.uploadQueue = nil
+  self.downloadQueue = nil
+  self.unchokeQueue = nil
+  self.interestedQueue = nil
+  
+  self.content = nil
 end
 
 
@@ -92,50 +103,97 @@ local messageHandler = {
     while #peer.pending do
       local req = peer.pending[1]
       table.remove(peer.pending, 1)
-      table.insert(peer.requests, req)
+      table.insert(self.missing[req.piece], req.block)
     end
   end,
   
   [1] = function(peer)
   
     -- After someone unchokes us, start pipelining block requests.
-    while #peer.pending < 4 and #peer.requests > 0 do
-      local req = peer.requests[1]
-      table.remove(peer.requests, 1)
-      table.insert(peer.pending, piece)
-      
-      -- Send a request message.
+    for i = 1, #self.interestedQueue[peer].pieces do
+      local piece = self.interestedQueue[peer].piece[i]
+      if self.missing[piece] and #self.missing[piece] then
+        local j
+        for j = 1, #self.missing[piece] do
+          table.insert(self.downloadQueue, Request:new({
+            piece = piece,
+            block = self.missing[piece][j],
+            length = 16384,
+            peer = peer.id,
+          }))
+        end
+      end
     end
   end,
   
   [2] = function(peer)
-    -- Unchoke them if possible.
+    local i
+    for i = 1, #self.unchokeQueue do
+      if self.unchokeQueue[i].peerId == peer.id then return end
+    end
+    
+    table.insert(self.unchokeQueue[i], peer.id)
   end,
   
   [3] = function(peer)
-    -- Choke them if possible
+    local i
+    for i = 1, #self.uploadQueue do
+      local req = self.uploadQueue[i]
+      if req.peer == peer.id then
+        table.remove(self.uploadQueue, i)
+        i = i - 1
+      end
+    end
   end,
   
   [4] = function(peer, piece)
-    -- Update datastructures, decide if you want to ask them for this piece.
+    self.rarity[piece] = self.rarity[piece] + 1
+    
+    if (not peer.interesting) and self.missing[piece] and #self.missing[piece] > 0 then
+      peer.interesting = true
+      peer:send(2)
+    end
   end,
   
   [5] = function(peer, bitfield)
-    -- Handled by Peer.
+    -- Update rarity.
   end,
   
   [6] = function(peer, piece, offset, length)
-    -- See if we have the piece and if we're able to serve the piece.
-    -- If we want to serve them the piece, then unchoke them (if not already).
-    -- Add these details to peer.want.
+    local block = math.floor(offset / 16384)
+    if not self.missing[piece] then
+      table.insert(self.uploadQueue, Request:new({
+        piece = piece,
+        block = block,
+        length = length,
+        peer = peer,
+        time = os.time()
+      }))
+    end
   end,
   
   [7] = function(peer, piece, offset, body)
-    -- They are sending us a block.  Save the block.
-  end,
-  
-  [8] = function(peer, piece, offset, length)
-    -- Remove the block from their want list.
+    -- TODO Write body to content cache.
+    -- TODO Check if it completes a piece.  Do a bunch of work if it does.
+    
+    local block = math.floor(offset / 16384)
+    
+    local i
+    for i = 1, #peer.pending do
+      if peer.pending[i].piece == piece and peer.pending[i].block == block then break end
+    end
+    
+    table.remove(peer.pending, i)
+    
+    -- Tell them they're uninteresting if we don't have anything left to ask of them.
+    if #peer.pending == 0 then
+      for i = 1, #self.downloadQueue do
+        if self.downloadQueue[i].peer == peer.id then
+          peer.interesting = false
+          peer:send(3)
+        end
+      end
+    end
   end
 }
 
@@ -146,6 +204,7 @@ function Torrent:start()
   if not self.metainfo then
     self:readMetainfo(function()
       if not self.trackers then self:initTrackers() end
+      if not self.peers then self.peers = {} end
       
       announceHandler = function(peers)
         for _, peer in ipairs(peers) do

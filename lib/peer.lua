@@ -29,19 +29,8 @@ function Peer:initialize(ip, port, pieceCount)
     self.pieces[i] = 0
   end
   
-  -- Pieces they have asked us for.
-  self.want = {}
-  
-  -- Pieces we would like to ask them for.
-  self.requests = {}
-  
-  -- A list containing pieces which we have requested, but haven't received.
+  -- A list containing blocks which we have requested, but haven't received.
   self.pending = {}
-  
-  -- A list of the amount of bytes we have downloaded/uploaded from/to this peer
-  -- In the past few seconds.
-  self.dnRate = {}
-  self.upRate = {}
 end
 
 function Peer:destroy()
@@ -110,7 +99,8 @@ function Peer:connect(protocol, infoHash, peerId)
     data = data:sub(21)
     
     -- Parse the peer id.
-    -- local pPeerId = data:sub(1, 20)
+    local pPeerId = data:sub(1, 20)
+    self.id = pPeerId
     data = data:sub(21)
     
     self.authenticated = true
@@ -146,7 +136,7 @@ function Peer:connect(protocol, infoHash, peerId)
         
         local id = str:byte(5)
         
-        -- Payload is either a single value or a table of values.
+        -- Payload is a list of values which gets unpack'd.
         local payload = {}
         
         -- Peer housekeeping goes in here.  Higher level logic is in torrent.lua.
@@ -198,6 +188,15 @@ function Peer:connect(protocol, infoHash, peerId)
   self.connection:on('error', function(err)
     print('Socket error: ' .. err.message)
   end)
+end
+
+
+--
+function Peer:send(id, ...)
+  local len
+  if id < 4 then len = 1 end
+  
+  self.connection:write(writeInt(len, 1) .. writeInt(id, 1))
 end
 
 return Peer
