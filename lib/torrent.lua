@@ -163,7 +163,7 @@ local messageHandler = {
           piece = piece,
           block = j,
           length = 16384
-        })
+        }))
         table.remove(self.missing[piece][j])
       end
     end
@@ -220,7 +220,6 @@ function Torrent:start()
       if not self.peers then self.peers = {} end
       
       announceHandler = function(peers)
-        print('pls')
         for _, peer in ipairs(peers) do
           peer:connect('BitTorrent protocol', self.infoHash, self.peerId)
           
