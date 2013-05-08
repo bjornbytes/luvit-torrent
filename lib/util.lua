@@ -2,6 +2,7 @@ local util = {}
 
 local string = require('string')
 local table = require('table')
+local math = require('math')
 
 
 -- orderedPairs

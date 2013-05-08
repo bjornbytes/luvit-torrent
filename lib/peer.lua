@@ -4,7 +4,7 @@ local math = require('math')
 local net = require('net')
 
 local readInt = require('./util').readInt
-require('./constants')
+local writeInt = require('./util').writeInt
 
 local Emitter = require('core').Emitter
 local buffer = require('buffer')
@@ -30,11 +30,12 @@ function Peer:initialize(ip, port, pieceCount)
     self.pieces[i] = 0
   end
   
-  -- A list containing requests which we will ask the peer for if they unchoke us.
-  self.want = {}
-  
   -- A list containing blocks which we have requested, but haven't received.
   self.pending = {}
+  
+  -- If we send a MSG_INTERESTED to them and they don't respond in X seconds, then we
+  -- drop them and ask someone else.
+  self.interestedTimer = nil
 end
 
 function Peer:destroy()
@@ -108,7 +109,9 @@ function Peer:connect(protocol, infoHash, peerId)
     data = data:sub(21)
     
     self.authenticated = true
-    self:emit('handshake')
+    self:emit('handshake', self.id)
+    
+    print('Handshake complete.')
     
     self.connection:emit('data', data, true) -- Let our main parse function parse the bitfield.
   end)
@@ -144,18 +147,17 @@ function Peer:connect(protocol, infoHash, peerId)
         local payload = {}
         
         -- Peer housekeeping goes in here.  Higher level logic is in torrent.lua.
-        if id == MSG_CHOKE then self.choking = true
-        elseif id == MSG_UNCHOKE then self.choking = false
-        elseif id == MSG_INTERESTED then self.interested = true
-        elseif id == MSG_UNINTERESTED then self.interested = false
-        elseif id == MSG_HAVE then
+        if id == 0 then self.choking = true
+        elseif id == 1 then self.choking = false
+        elseif id == 2 then self.interested = true
+        elseif id == 3 then self.interested = false
+        elseif id == 4 then
           local piece = readInt(str:sub(6, 9))
           table.insert(payload, piece)
-          self.pieces[piece] = 1
-        elseif id == MSG_BITFIELD then
+          self.pieces[piece + 1] = 1
+        elseif id == 5 then
           local bitfield = str:sub(6, 6 + len - 1)
 
-          table.insert(payload, bitfield)
           local j, i = 1
           for i = 1, #bitfield do
             local b = bitfield:byte(i)
@@ -163,24 +165,26 @@ function Peer:connect(protocol, infoHash, peerId)
             while b > 0 and j < #self.pieces do
               local rem = b % 2
               self.pieces[j + k] = rem
-              j = j + 1
               k = k - 1
+              if k == -1 then
+                j = j + 8
+              end
               b = math.floor(b / 2)
             end
           end
-        elseif id == MSG_REQUEST then
+        elseif id == 6 then
           table.insert(payload, readInt(str:sub(6, 9)))
           table.insert(payload, readInt(str:sub(10, 13)))
           table.insert(payload, readInt(str:sub(14, 17)))
-        elseif id == MSG_PIECE then
+        elseif id == 7 then
           table.insert(payload, readInt(str:sub(6, 9)))
           table.insert(payload, readInt(str:sub(10, 13)))
           table.insert(payload, str:sub(14, 14 + len - 10))
-        elseif id == MSG_CANCEL then
+        elseif id == 8 then
             table.insert(payload, readInt(str:sub(6, 9)))
             table.insert(payload, readInt(str:sub(10, 13)))
             table.insert(payload, readInt(str:sub(14, 17)))
-        elseif id == MSG_PORT then table.insert(payload, readInt(str:sub(6, 7))) end
+        elseif id == 9 then table.insert(payload, readInt(str:sub(6, 7))) end
         
         self:emit('message', id, unpack(payload))
         
@@ -191,16 +195,35 @@ function Peer:connect(protocol, infoHash, peerId)
   
   self.connection:on('error', function(err)
     print('Socket error: ' .. err.message)
+    self.connection:destroy()
   end)
 end
 
 
 --
 function Peer:send(id, ...)
-  local len
-  if id < 4 then len = 1 end
+  local len, msg
+  local args = {...}
+  if id < 4 then len = 1
+  elseif id == 6 then len = 13 end
   
-  self.connection:write(writeInt(len, 1) .. writeInt(id, 1))
+  msg = writeInt(len, 4) .. writeInt(id, 1)
+  
+  if id == 6 then msg = msg .. writeInt(args[1], 4) .. writeInt(args[2], 4) .. writeInt(args[3], 4) end
+  
+  self.connection:write(msg)
+end
+
+
+function Peer:choke()
+  self.choked = true
+  self:send(0)
+end
+
+
+function Peer:unchoke()
+  self.choked = false
+  self:send(1)
 end
 
 return Peer
