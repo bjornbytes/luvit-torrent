@@ -14,6 +14,7 @@ local timer = require('timer')
 local Object = require('core').Object
 local Tracker = require('./tracker')
 local Request = require('./request')
+local Pipeline = require('./pipeline')
 
 local Torrent = Object:extend()
 
@@ -30,8 +31,12 @@ function Torrent:initialize(location)
   self.missing = {}
   self.rarity = {}
   
-  self.uploadQueue = {}
-  self.downloadQueue = {}
+  self.uploadQueue = Pipeline:new(200000, function(req)
+    req.peer:send(7, req.piece, req.block, content[req.piece][req.block])
+  end)
+  self.downloadQueue = Pipeline:new(100000, function(req)
+    req.peer:send(6, req.piece, req.block, req.length)
+  end)
   self.unchokeQueue = {}
   self.interestedQueue = {}
   
@@ -138,17 +143,18 @@ local messageHandler = {
     local i
     local flag = false
     for i = 1, #peer.pieces do
-      if peer.pieces[i] == 1 and self.missing[i] and #self.missing[i] > 0 then
+      local piece = i
+      if peer.pieces[piece] == 1 and self.missing[piece] and #self.missing[piece] > 0 then
         local j
-        for j = 1, #self.missing[i] do
-          local block = self.missing[i][j]
+        for j = 1, #self.missing[piece] do
+          local block = self.missing[piece][j]
           local req = Request:new({
-            piece = i,
+            piece = piece,
             block = block,
             length = 16384,
             peer = peer
           })
-          table.insert(self.downloadQueue, req)
+          self.downloadQueue:add(req, req.length)
         end
       end
     end
@@ -206,12 +212,13 @@ local messageHandler = {
   [6] = function(self, peer, piece, offset, length)
     local block = math.floor(offset / 16384)
     if not self.missing[piece] then
-      table.insert(self.uploadQueue, Request:new({
+      local req = Request:new({
         piece = piece,
         block = block,
         length = length,
         peer = peer
-      }))
+      })
+      self.uploadQueue:add(req, req.length)
     end
   end,
   
@@ -352,18 +359,5 @@ function Torrent:pipeInterested()
   end
 end
 
-
-function Torrent:pipeDownloads()
-  local i
-  for i = 1, #self.downloadQueue do
-    local req = self.downloadQueue[i]
-    if #req.peer.pending < 4 then
-      table.insert(req.peer.pending, req)
-      req.peer:send(6, req.piece, req.block, req.length)
-      table.remove(self.downloadQueue, i)
-      break
-    end
-  end
-end
 
 return Torrent
