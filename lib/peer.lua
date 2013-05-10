@@ -211,6 +211,7 @@ function Peer:send(id, ...)
   
   if id == 6 then msg = msg .. writeInt(args[1], 4) .. writeInt(args[2], 4) .. writeInt(args[3], 4) end
   
+  print('Sent ' .. id)
   self.connection:write(msg)
 end
 

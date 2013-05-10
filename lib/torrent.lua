@@ -11,12 +11,9 @@ local sha1 = require('./sha1')
 local util = require('./util')
 local timer = require('timer')
 
-require('./constants')
-
 local Object = require('core').Object
 local Tracker = require('./tracker')
 local Request = require('./request')
-local Pipeline = require('./pipeline')
 
 local Torrent = Object:extend()
 
@@ -145,15 +142,18 @@ local messageHandler = {
         local j
         for j = 1, #self.missing[i] do
           local block = self.missing[i][j]
-          --[[table.insert(self.downloadQueue, Request:new({
+          local req = Request:new({
             piece = i,
             block = block,
             length = 16384,
-            peer = peer.id
-          }))]]--
+            peer = peer
+          })
+          table.insert(self.downloadQueue, req)
         end
       end
     end
+    
+    self:pipeDownloads()
   end,
   
   [2] = function(self, peer)
@@ -230,14 +230,22 @@ local messageHandler = {
     table.remove(peer.pending, i)
     
     -- Tell them they're uninteresting if we don't have anything left to ask of them.
+    local more = false
     if #peer.pending == 0 then
       for i = 1, #self.downloadQueue do
         if self.downloadQueue[i].peer == peer.id then
-          peer.interesting = false
-          peer:send(3)
+          more = true
+          break
         end
       end
     end
+    
+    if more == false then
+      peer.interesting = false
+      peer:send(3)
+    end
+    
+    self:pipeDownloads()
   end
 }
 
@@ -330,15 +338,31 @@ function Torrent:pipeInterested()
   while self.remotePending + self.remoteSeed < 6 and #self.interestedQueue > 0 do
     local peer = self.interestedQueue[1]
     table.remove(self.interestedQueue, 1)
-
-    peer:send(2)
-    self.remotePending = self.remotePending + 1
-    peer.interestedTimer = timer.setTimeout(5000, function()
-      table.insert(self.interestedQueue, peer)
-      peer:send(3)
+    
+    if peer.choking then
+      peer:send(2)
       self.remotePending = self.remotePending + 1
-      self:pipeInterested()
-    end)
+      peer.interestedTimer = timer.setTimeout(5000, function()
+        table.insert(self.interestedQueue, peer)
+        peer:send(3)
+        self.remotePending = self.remotePending - 1
+        self:pipeInterested()
+      end)
+    end
+  end
+end
+
+
+function Torrent:pipeDownloads()
+  local i
+  for i = 1, #self.downloadQueue do
+    local req = self.downloadQueue[i]
+    if #req.peer.pending < 4 then
+      table.insert(req.peer.pending, req)
+      req.peer:send(6, req.piece, req.block, req.length)
+      table.remove(self.downloadQueue, i)
+      break
+    end
   end
 end
 

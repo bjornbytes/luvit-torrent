@@ -2,7 +2,7 @@ local Object = require('core').Object
 
 local Request = Object:extend()
 
-function Request:new(options)
+function Request:initialize(options)
   self.piece = options.piece
   self.block = options.block
   self.length = options.length
