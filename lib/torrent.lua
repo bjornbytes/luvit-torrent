@@ -36,6 +36,7 @@ function Torrent:initialize(location)
   end)
   self.downloadQueue = Pipeline:new(100000, function(req)
     req.peer:send(6, req.piece, req.block, req.length)
+    table.insert(req.peer.pending, req)
   end)
   self.unchokeQueue = {}
   self.interestedQueue = {}
@@ -129,6 +130,16 @@ local messageHandler = {
       table.insert(self.missing[req.piece], req.block)
     end
     
+    local i
+    for i = 1, #self.downloadQueue.queue do
+      if self.downloadQueue.queue[i].obj.peer == peer then
+        local req = self.downloadQueue.queue[i]
+        table.insert(self.missing[req.piece], req.block)
+        table.remove(self.downloadQueue.queue, i)
+        i = i - 1
+      end
+    end
+    
     self.remoteSeed = self.remoteSeed - 1
     
     -- Have to look in download queue as well.
@@ -155,12 +166,15 @@ local messageHandler = {
             length = 16384,
             peer = peer
           })
+
+          table.remove(self.missing[piece], j)
+          j = j - 1
           table.insert(rarest, {req = req, rarity = self.rarity[piece]})
         end
       end
     end
     
-    tabl.sort(rarest, function(a, b) return a.rarity < b.rarity end)
+    table.sort(rarest, function(a, b) return a.rarity < b.rarity end)
     
     for i = 1, #rarest do
       self.downloadQueue:add(rarest[i].req, rarest[i].req.length)
