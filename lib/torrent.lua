@@ -73,6 +73,7 @@ function Torrent:readMetainfo(callback)
     local blocks = math.ceil(self.metainfo.info['piece length'] / 16384)
     local i
     for i = 1, pieces do
+      self.rarity[i] = 0
       self.missing[i] = {}
       local j
       for j = 1, blocks do
@@ -141,7 +142,7 @@ local messageHandler = {
     self.remoteSeed = self.remoteSeed + 1
     
     local i
-    local flag = false
+    local rarest = {}
     for i = 1, #peer.pieces do
       local piece = i
       if peer.pieces[piece] == 1 and self.missing[piece] and #self.missing[piece] > 0 then
@@ -154,12 +155,16 @@ local messageHandler = {
             length = 16384,
             peer = peer
           })
-          self.downloadQueue:add(req, req.length)
+          table.insert(rarest, {req = req, rarity = self.rarity[piece]})
         end
       end
     end
     
-    self:pipeDownloads()
+    tabl.sort(rarest, function(a, b) return a.rarity < b.rarity end)
+    
+    for i = 1, #rarest do
+      self.downloadQueue:add(rarest[i].req, rarest[i].req.length)
+    end
   end,
   
   [2] = function(self, peer)
@@ -186,7 +191,7 @@ local messageHandler = {
   end,
   
   [4] = function(self, peer, piece)
-    -- self.rarity[piece] = self.rarity[piece] + 1
+    self.rarity[piece] = self.rarity[piece] + 1
     
     if self.missing[piece] and #self.missing[piece] > 0 and not peer.interesting then
       self.interestedQueue[#self.interestedQueue + 1] = peer
@@ -199,11 +204,14 @@ local messageHandler = {
     if not peer.interesting then
       local i
       for i = 1, #peer.pieces do
-        if peer.pieces[i] == 1 and self.missing[piece] and #self.missing[piece] > 0 then
-          self.interestedQueue[#self.interestedQueue + 1] = peer
-          peer.interesting = true
-          self:pipeInterested()
-          break
+        if peer.pieces[i] == 1 then
+          self.rarity[i] = self.rarity[i] + 1
+          if self.missing[piece] and #self.missing[piece] > 0 then
+            self.interestedQueue[#self.interestedQueue + 1] = peer
+            peer.interesting = true
+            self:pipeInterested()
+            break
+          end
         end
       end
     end
