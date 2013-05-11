@@ -33,6 +33,9 @@ function Peer:initialize(ip, port, pieceCount)
   -- A list containing blocks which we have requested, but haven't received.
   self.pending = {}
   
+  -- A counter containing the number of requests we have queued for the peer.
+  self.numWant = 0
+  
   -- If we send a MSG_INTERESTED to them and they don't respond in X seconds, then we
   -- drop them and ask someone else.
   self.interestedTimer = nil

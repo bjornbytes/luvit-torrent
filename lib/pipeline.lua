@@ -24,8 +24,7 @@ function Pipeline:pipe()
   local job = self.queue[1]
   table.remove(self.queue, 1)
   self.run(job.obj)
-  
-  self.nextTimer = timer.setTimeout((job.weight / self.rate) * 1000, self:pipe)
+  self.nextTimer = timer.setTimeout((job.weight / self.rate) * 1000, function() self:pipe() end)
 end  
 
 return Pipeline

@@ -2,11 +2,11 @@ local Object = require('core').Object
 
 local Request = Object:extend()
 
-function Request:initialize(options)
-  self.piece = options.piece
-  self.block = options.block
-  self.length = options.length
-  self.peer = options.peer
+function Request:initialize(piece, block, length, peer)
+  self.piece = piece
+  self.block = block
+  self.length = length
+  self.peer = peer
 end
 
 return Request

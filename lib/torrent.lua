@@ -122,14 +122,13 @@ local messageHandler = {
   [0] = function(self, peer)
   
     -- If they choke us and we've requested pieces, put these requests back in the pool.
-    -- We don't put them back in peer.want because we're going to ask someone else for them
-    -- instead.
     while #peer.pending > 0 do
       local req = peer.pending[1]
       table.remove(peer.pending, 1)
       table.insert(self.missing[req.piece], req.block)
     end
     
+    -- If we were about to request pieces and they choke us, put them back in the pool.
     local i
     for i = 1, #self.downloadQueue.queue do
       if self.downloadQueue.queue[i].obj.peer == peer then
@@ -140,9 +139,8 @@ local messageHandler = {
       end
     end
     
+    peer.numWant = 0
     self.remoteSeed = self.remoteSeed - 1
-    
-    -- Have to look in download queue as well.
   end,
   
   [1] = function(self, peer)
@@ -152,32 +150,38 @@ local messageHandler = {
     self.remotePending = self.remotePending - 1
     self.remoteSeed = self.remoteSeed + 1
     
+    -- Find the rarest piece they have.  Insert all missing blocks for this piece
+    -- into the download queue.
+    
+    -- Make a copy of our rarity table and sort it by rarity so we can quickly iterate
+    -- over the most rare pieces in order.
+    -- This is disgusting and needs to be changed in the future. TODO
+    local sortedRarity = {}
+    for k, v in pairs(self.rarity) do
+      table.insert(sortedRarity, {piece = k, rarity = v})
+    end
+    table.sort(sortedRarity, function(a, b) return a.rarity < b.rarity end)
+    
     local i
-    local rarest = {}
-    for i = 1, #peer.pieces do
-      local piece = i
+    local requests = {}
+    for i = 1, #sortedRarity do
+      local piece = sortedRarity[i].piece
       if peer.pieces[piece] == 1 and self.missing[piece] and #self.missing[piece] > 0 then
-        local j
-        for j = 1, #self.missing[piece] do
-          local block = self.missing[piece][j]
-          local req = Request:new({
-            piece = piece,
-            block = block,
-            length = 16384,
-            peer = peer
-          })
-
-          table.remove(self.missing[piece], j)
-          j = j - 1
-          table.insert(rarest, {req = req, rarity = self.rarity[piece]})
+        while #self.missing[piece] > 0 do
+          local block = self.missing[piece][1]
+          local req = Request:new(piece, block, 16384, peer)
+          table.remove(self.missing[piece][1])
+          table.insert(requests, req)
         end
+        
+        break
       end
     end
     
-    table.sort(rarest, function(a, b) return a.rarity < b.rarity end)
-    
-    for i = 1, #rarest do
-      self.downloadQueue:add(rarest[i].req, rarest[i].req.length)
+    local i
+    for i = 1, #requests do
+      self.downloadQueue:add(requests[i], requests[i].length)
+      requests[i].peer.numWant = requests[i].peer.numWant + 1
     end
   end,
   
@@ -234,12 +238,7 @@ local messageHandler = {
   [6] = function(self, peer, piece, offset, length)
     local block = math.floor(offset / 16384)
     if not self.missing[piece] then
-      local req = Request:new({
-        piece = piece,
-        block = block,
-        length = length,
-        peer = peer
-      })
+      local req = Request:new(piece, block, length, peer)
       self.uploadQueue:add(req, req.length)
     end
   end,
@@ -259,22 +258,13 @@ local messageHandler = {
     table.remove(peer.pending, i)
     
     -- Tell them they're uninteresting if we don't have anything left to ask of them.
-    local more = false
-    if #peer.pending == 0 then
-      for i = 1, #self.downloadQueue do
-        if self.downloadQueue[i].peer == peer.id then
-          more = true
-          break
-        end
-      end
-    end
+    peer.numWant = peer.numWant - 1
     
-    if more == false then
-      peer.interesting = false
+    if peer.numWant == 0 then
+      -- TODO try to find more pieces to ask them for.
       peer:send(3)
+      peer.interesting = false
     end
-    
-    self:pipeDownloads()
   end
 }
 
