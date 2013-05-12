@@ -66,4 +66,51 @@ function util.writeInt(num, width)
   return _n2b({}, width, math.modf(num/256))
 end
 
+
+-- Linked lists.
+local Object = require('core').Object
+
+local LinkedList = Object:extend()
+
+function LinkedList:initialize()
+  self.head = nil
+  self.tail = nil
+end
+
+function LinkedList:insert(val)
+  local node = {
+    val = val,
+    next = self.head,
+    prev = nil
+  }
+  
+  if self.head then self.head.prev = node end
+  if self.tail == nil then self.tail = node end
+  
+  self.head = node
+  return node
+end
+
+function LinkedList:append(val)
+  local node = {
+    val = val,
+    next = nil,
+    prev = self.tail
+  }
+  
+  if self.tail then self.tail.next = node end
+  if self.head == nil then self.head = node end
+  
+  self.tail = node
+  return node
+end
+
+function LinkedList:remove(node)
+  if node.prev then node.prev.next = node.next end
+  if node.next then node.next.prev = node.prev end
+  node = nil
+end
+
+util.LinkedList = LinkedList
+
 return util
