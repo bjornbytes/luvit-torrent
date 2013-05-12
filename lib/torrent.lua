@@ -45,7 +45,7 @@ function Torrent:initialize(location)
   self.remotePending = 0
   self.remoteSeed = 0
   
-  self.content = nil
+  self.content = {}
 end
 
 
@@ -79,6 +79,8 @@ function Torrent:readMetainfo(callback)
       local j
       for j = 1, blocks do
         table.insert(self.missing[i], j - 1)
+        local key = tostring(i) .. ':' .. tostring(j)
+        self.content[key] = nil
       end
     end
     if callback then callback() end
@@ -170,7 +172,7 @@ local messageHandler = {
         while #self.missing[piece] > 0 do
           local block = self.missing[piece][1]
           local req = Request:new(piece, block, 16384, peer)
-          table.remove(self.missing[piece][1])
+          table.remove(self.missing[piece], 1)
           table.insert(requests, req)
         end
         
@@ -248,9 +250,28 @@ local messageHandler = {
     -- TODO Check if it completes a piece.  Do a bunch of work if it does.
     print('Got piece ' .. piece .. ':' .. offset .. '!')
     
-    local block = math.floor(offset / 16384)
+    local block = offset
+    
+    local key = tostring(piece) .. ':' .. tostring(block)
+    self.content[key] = body
     
     local i
+    local complete = true
+    for i = 0, math.floor(self.metainfo.info['piece length'] / 16384) - 1 do
+      local key = tostring(piece) .. ':' .. tostring(i)
+      if self.content[key] == nil then complete = false break end
+    end
+    if complete == true then
+      local handle = io.open(self.metainfo.info.name, 'w')
+      handle:seek('set', (piece * self.metainfo.info['piece length']) + (block * 16384))
+      for i = 0, math.floor(self.metainfo.info['piece length'] / 16384) - 1 do
+        local key = tostring(piece) .. ':' .. tostring(i)
+        handle:write(self.content[key])
+      end
+      handle:flush()
+      handle:close()
+    end
+    
     for i = 1, #peer.pending do
       if peer.pending[i].piece == piece and peer.pending[i].block == block then break end
     end
