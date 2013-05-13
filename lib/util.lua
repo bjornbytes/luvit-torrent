@@ -75,6 +75,7 @@ local LinkedList = Object:extend()
 function LinkedList:initialize()
   self.head = nil
   self.tail = nil
+  self.length = 0
 end
 
 function LinkedList:insert(val)
@@ -88,6 +89,7 @@ function LinkedList:insert(val)
   if self.tail == nil then self.tail = node end
   
   self.head = node
+  self.length = self.length + 1
   return node
 end
 
@@ -102,13 +104,15 @@ function LinkedList:append(val)
   if self.head == nil then self.head = node end
   
   self.tail = node
+  self.length = self.length + 1
   return node
 end
 
 function LinkedList:remove(node)
-  if node.prev then node.prev.next = node.next end
-  if node.next then node.next.prev = node.prev end
+  if node.prev then node.prev.next = node.next else self.head = node.next end
+  if node.next then node.next.prev = node.prev else self.tail = node.prev end
   node = nil
+  self.length = self.length - 1
 end
 
 util.LinkedList = LinkedList
