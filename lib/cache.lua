@@ -74,9 +74,10 @@ end
 -- Frees the least-recently-used element.
 function Cache:evict()
   local key = self.chronList.tail.val
-  self.cache[key] = nil
-  self.chronList:remove(self.chronList.tail)
-  if self.free then self.free(key) end
+  if self.free then self.free(key, function()
+    self.cache[key] = nil
+    self.chronList:remove(self.chronList.tail)
+  end)
 end
 
 

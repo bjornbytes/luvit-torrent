@@ -15,6 +15,7 @@ local Object = require('core').Object
 local Tracker = require('./tracker')
 local Request = require('./request')
 local Pipeline = require('./pipeline')
+local Cache = require('./cache')
 
 local Torrent = Object:extend()
 
@@ -45,7 +46,23 @@ function Torrent:initialize(location)
   self.remotePending = 0
   self.remoteSeed = 0
   
-  self.content = {}
+  -- Cache 4,000 blocks.
+  self.content = Cache:new(4096, function(key, callback)
+    local piece, block = key:sub(1, key:match(':') - 1), key:sub(key:match(':') + 1)
+    local stream = fs.createReadStream(self.metainfo.info.name, {
+      offset = (piece * self.metainfo.info['piece length']) + (block * 16384),
+      length = 16384
+    })
+    local data = ''
+    stream:on('data', function(chunk)
+      data = data .. chunk
+    end)
+    stream:on('end', function()
+      callback(data)
+    end)
+  end, function(key)
+    -- Luvit doesn't have asynchronous write streams :[ TODO
+  end)
 end
 
 
@@ -253,23 +270,17 @@ local messageHandler = {
     local block = offset
     
     local key = tostring(piece) .. ':' .. tostring(block)
-    self.content[key] = body
+    self.content:set(key, body)
     
+    -- The below check can probably be optimized.
     local i
     local complete = true
     for i = 0, math.floor(self.metainfo.info['piece length'] / 16384) - 1 do
       local key = tostring(piece) .. ':' .. tostring(i)
-      if self.content[key] == nil then complete = false break end
+      if not self.content:has(key) then complete = false break end
     end
     if complete == true then
-      local handle = io.open(self.metainfo.info.name, 'w')
-      handle:seek('set', (piece * self.metainfo.info['piece length']) + (block * 16384))
-      for i = 0, math.floor(self.metainfo.info['piece length'] / 16384) - 1 do
-        local key = tostring(piece) .. ':' .. tostring(i)
-        handle:write(self.content[key])
-      end
-      handle:flush()
-      handle:close()
+      -- Luvit doesn't have asynchronous write streams :[ TODO
     end
     
     for i = 1, #peer.pending do
