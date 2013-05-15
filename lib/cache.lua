@@ -64,17 +64,10 @@ function Cache:set(key, val)
 end
 
 
--- Deletes the key from the cache using free.
-function Cache:unset(key)
-  self.chronList:remove(self.cache[key].chron)
-  self.cache[key] = nil
-end
-
-
 -- Frees the least-recently-used element.
 function Cache:evict()
   local key = self.chronList.tail.val
-  if self.free then self.free(key, function()
+  if self.free then self.free(key, self.cache[key].val, function()
       self.cache[key] = nil
       self.chronList:remove(self.chronList.tail)
     end)
