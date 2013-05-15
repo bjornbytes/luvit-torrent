@@ -60,8 +60,18 @@ function Torrent:initialize(location)
     stream:on('end', function()
       callback(data)
     end)
-  end, function(key)
+  end, function(key, done)
+    local piece, block = key:sub(1, key:match(':') - 1), key:sub(key:match(':') + 1)
+    
     -- Luvit doesn't have asynchronous write streams :[ TODO
+    local stream = fs.createWriteStream(self.metainfo.info.name, {
+      offset = (piece * self.metainfo.info['piece length']) + (block * 16384)
+    })
+    self.content:get(key, function(val)
+      stream:write(val)
+      stream:close()
+      done()
+    end)
   end)
 end
 
@@ -280,7 +290,28 @@ local messageHandler = {
       if not self.content:has(key) then complete = false break end
     end
     if complete == true then
+      
+      -- Write out piece data.
       -- Luvit doesn't have asynchronous write streams :[ TODO
+      local stream = fs.createWriteStream(self.metainfo.info.name, {
+        offset = piece * self.metainfo.info['piece length']
+      })
+      local data = ''
+      for i = 0, math.floor(self.metainfo.info['piece length'] / 16384) - 1 do
+        local key = tostring(piece) .. ':' .. tostring(i)
+        self.content:get(key, function(val)
+          stream:write(val)
+          if i == math.floor(self.metainfo.info['piece length'] / 16384) - 1 then
+            stream:close()
+          end
+        end)
+      end
+      
+      -- Signal that we have the piece to all peers, and clear the missing entry for this piece.
+      self.missing[piece] = nil
+      for _, v in pairs(self.peers) do
+        v:send(4, piece)
+      end
     end
     
     for i = 1, #peer.pending do

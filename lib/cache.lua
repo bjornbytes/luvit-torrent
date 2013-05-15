@@ -75,9 +75,10 @@ end
 function Cache:evict()
   local key = self.chronList.tail.val
   if self.free then self.free(key, function()
-    self.cache[key] = nil
-    self.chronList:remove(self.chronList.tail)
-  end)
+      self.cache[key] = nil
+      self.chronList:remove(self.chronList.tail)
+    end)
+  end
 end
 
 

@@ -208,11 +208,13 @@ function Peer:send(id, ...)
   local len, msg
   local args = {...}
   if id < 4 then len = 1
+  elseif id == 4 then len = 5
   elseif id == 6 then len = 13 end
   
   msg = writeInt(len, 4) .. writeInt(id, 1)
   
-  if id == 6 then msg = msg .. writeInt(args[1], 4) .. writeInt(args[2], 4) .. writeInt(args[3], 4) end
+  if id == 4 then msg = msg .. writeInt(args[1], 4)
+  elseif id == 6 then msg = msg .. writeInt(args[1], 4) .. writeInt(args[2], 4) .. writeInt(args[3], 4) end
   
   print('Sent ' .. id)
   self.connection:write(msg)
