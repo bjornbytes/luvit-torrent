@@ -64,7 +64,8 @@ function Torrent:initialize(location)
     local piece, block = key:sub(1, key:match(':') - 1), key:sub(key:match(':') + 1)
     
     -- Luvit doesn't have asynchronous write streams :[ TODO
-    local stream = fs.createWriteStream(self.metainfo.info.name, {
+    local stream = fs.createWriteStream(self.metainfo.info.name .. '.part', {
+      flags = 'r+',
       offset = (piece * self.metainfo.info['piece length']) + (block * 16384)
     })
     self.content:get(key, function(val)
@@ -94,15 +95,20 @@ function Torrent:readMetainfo(callback)
   
   local function parse(data)
     self.metainfo = bencode.decode(data)
-    for k, v in pairs(self.metainfo) do
-      print(k, v)
-    end
+    
+    local stream = fs.createWriteStream(self.metainfo.info.name .. '.part', {
+      flags = 'w',
+      offset = 0
+    })
+    stream:write(string.rep('0', self.metainfo.info.length))
+    stream:close()
+    
     self.infoHash = sha1.hash(bencode.encode(self.metainfo.info)):gsub('(%w%w)', function(x)
       return string.char(tonumber(x, 16))
     end)
     local pieces = math.ceil(self.metainfo.info.length / self.metainfo.info['piece length'])
     local blocks = math.ceil(self.metainfo.info['piece length'] / 16384)
-    local i
+    --local i
     for i = 1, pieces do
       self.rarity[i] = 0
       self.missing[i] = {}
@@ -264,7 +270,8 @@ local messageHandler = {
       
       -- Write out piece data.
       -- Luvit doesn't have asynchronous write streams :[ TODO
-      local stream = fs.createWriteStream(self.metainfo.info.name, {
+      local stream = fs.createWriteStream(self.metainfo.info.name .. '.part', {
+        flags = 'r+',
         offset = piece * self.metainfo.info['piece length']
       })
       local data = ''
