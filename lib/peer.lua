@@ -26,7 +26,7 @@ function Peer:initialize(ip, port, pieceCount)
   -- Bitfield representing which pieces this peer has.
   self.pieces = {}
   local i
-  for i = 1, pieceCount do
+  for i = 0, pieceCount - 1 do
     self.pieces[i] = 0
   end
   
@@ -157,11 +157,11 @@ function Peer:connect(protocol, infoHash, peerId)
         elseif id == 4 then
           local piece = readInt(str:sub(6, 9))
           table.insert(payload, piece)
-          self.pieces[piece + 1] = 1
+          self.pieces[piece] = 1
         elseif id == 5 then
           local bitfield = str:sub(6, 6 + len - 1)
 
-          local j, i = 1
+          local j, i = 0
           for i = 1, #bitfield do
             local b = bitfield:byte(i)
             local k = 7
@@ -216,7 +216,7 @@ function Peer:send(id, ...)
   if id == 4 then msg = msg .. writeInt(args[1], 4)
   elseif id == 6 then msg = msg .. writeInt(args[1], 4) .. writeInt(args[2], 4) .. writeInt(args[3], 4) end
   
-  print('Sent ' .. id)
+  -- print('Sent ' .. id)
   self.connection:write(msg)
 end
 

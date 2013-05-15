@@ -48,7 +48,7 @@ function Torrent:initialize(location)
   
   -- Cache 4,000 blocks.
   self.content = Cache:new(4096, function(key, callback)
-    local piece, block = key:sub(1, key:match(':') - 1), key:sub(key:match(':') + 1)
+    local piece, block = key:sub(1, key:find(':') - 1), key:sub(key:find(':') + 1)
     local stream = fs.createReadStream(self.metainfo.info.name, {
       offset = (piece * self.metainfo.info['piece length']) + (block * 16384),
       length = 16384
@@ -59,9 +59,10 @@ function Torrent:initialize(location)
     end)
     stream:on('end', function()
       callback(data)
+      stream:close()
     end)
   end, function(key, done)
-    local piece, block = key:sub(1, key:match(':') - 1), key:sub(key:match(':') + 1)
+    local piece, block = key:sub(1, key:find(':') - 1), key:sub(key:find(':') + 1)
     
     -- Luvit doesn't have asynchronous write streams :[ TODO
     local stream = fs.createWriteStream(self.metainfo.info.name .. '.part', {
@@ -109,14 +110,12 @@ function Torrent:readMetainfo(callback)
     local pieces = math.ceil(self.metainfo.info.length / self.metainfo.info['piece length'])
     local blocks = math.ceil(self.metainfo.info['piece length'] / 16384)
     --local i
-    for i = 1, pieces do
+    for i = 0, pieces - 1 do
       self.rarity[i] = 0
       self.missing[i] = {}
       local j
-      for j = 1, blocks do
-        table.insert(self.missing[i], j - 1)
-        local key = tostring(i) .. ':' .. tostring(j)
-        self.content[key] = nil
+      for j = 0, blocks - 1 do
+        table.insert(self.missing[i], j)
       end
     end
     if callback then callback() end
@@ -252,7 +251,6 @@ local messageHandler = {
   [7] = function(self, peer, piece, offset, body)
     -- TODO Write body to content cache.
     -- TODO Check if it completes a piece.  Do a bunch of work if it does.
-    print('Got piece ' .. piece .. ':' .. offset .. '!')
     
     local block = offset
     
@@ -278,7 +276,6 @@ local messageHandler = {
       for i = 0, math.floor(self.metainfo.info['piece length'] / 16384) - 1 do
         local key = tostring(piece) .. ':' .. tostring(i)
         self.content:get(key, function(val)
-          print('writing out block ' .. key .. ' (offset ' .. (piece * self.metainfo.info['piece length']) .. ')')
           stream:write(val)
           if i == math.floor(self.metainfo.info['piece length'] / 16384) - 1 then
             stream:close()
@@ -286,10 +283,16 @@ local messageHandler = {
         end)
       end
       
-      -- Signal that we have the piece to all peers, and clear the missing entry for this piece.
+      -- Signal that we have the piece to all peers, clear the missing entry for this piece.
       self.missing[piece] = nil
       for _, v in pairs(self.peers) do
         v:send(4, piece)
+      end
+      
+      print('Wrote out piece ' .. piece)
+      local pieces = math.ceil(self.metainfo.info.length / self.metainfo.info['piece length'])
+      for i = 0, pieces do
+        if self.missing[i] then print('Still need piece ' .. i) end
       end
     end
     
@@ -332,7 +335,7 @@ function Torrent:start()
             self.peers[id] = peer
           end)
           peer:on('message', function(id, ...)
-            if id ~= 4 then print('\t\t\t\tReceived ' .. id) end
+            -- if id ~= 4 then print('\t\t\t\tReceived ' .. id) end
             messageHandler[id](self, peer, ...)
           end)
         end
