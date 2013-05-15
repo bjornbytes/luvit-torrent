@@ -94,6 +94,9 @@ function Torrent:readMetainfo(callback)
   
   local function parse(data)
     self.metainfo = bencode.decode(data)
+    for k, v in pairs(self.metainfo) do
+      print(k, v)
+    end
     self.infoHash = sha1.hash(bencode.encode(self.metainfo.info)):gsub('(%w%w)', function(x)
       return string.char(tonumber(x, 16))
     end)
@@ -179,39 +182,7 @@ local messageHandler = {
     self.remotePending = self.remotePending - 1
     self.remoteSeed = self.remoteSeed + 1
     
-    -- Find the rarest piece they have.  Insert all missing blocks for this piece
-    -- into the download queue.
-    
-    -- Make a copy of our rarity table and sort it by rarity so we can quickly iterate
-    -- over the most rare pieces in order.
-    -- This is disgusting and needs to be changed in the future. TODO
-    local sortedRarity = {}
-    for k, v in pairs(self.rarity) do
-      table.insert(sortedRarity, {piece = k, rarity = v})
-    end
-    table.sort(sortedRarity, function(a, b) return a.rarity < b.rarity end)
-    
-    local i
-    local requests = {}
-    for i = 1, #sortedRarity do
-      local piece = sortedRarity[i].piece
-      if peer.pieces[piece] == 1 and self.missing[piece] and #self.missing[piece] > 0 then
-        while #self.missing[piece] > 0 do
-          local block = self.missing[piece][1]
-          local req = Request:new(piece, block, 16384, peer)
-          table.remove(self.missing[piece], 1)
-          table.insert(requests, req)
-        end
-        
-        break
-      end
-    end
-    
-    local i
-    for i = 1, #requests do
-      self.downloadQueue:add(requests[i], requests[i].length)
-      requests[i].peer.numWant = requests[i].peer.numWant + 1
-    end
+    self:requestPieces(peer)
   end,
   
   [2] = function(self, peer)
@@ -300,6 +271,7 @@ local messageHandler = {
       for i = 0, math.floor(self.metainfo.info['piece length'] / 16384) - 1 do
         local key = tostring(piece) .. ':' .. tostring(i)
         self.content:get(key, function(val)
+          print('writing out block ' .. key .. ' (offset ' .. (piece * self.metainfo.info['piece length']) .. ')')
           stream:write(val)
           if i == math.floor(self.metainfo.info['piece length'] / 16384) - 1 then
             stream:close()
@@ -324,9 +296,12 @@ local messageHandler = {
     peer.numWant = peer.numWant - 1
     
     if peer.numWant == 0 then
-      -- TODO try to find more pieces to ask them for.
-      peer:send(3)
-      peer.interesting = false
+      -- Try to find more pieces to ask them for.
+      if self:requestPieces(peer) then return
+      else
+        peer:send(3)
+        peer.interesting = false
+      end
     end
   end
 }
@@ -350,7 +325,7 @@ function Torrent:start()
             self.peers[id] = peer
           end)
           peer:on('message', function(id, ...)
-            if id ~= 4 then print('Received ' .. id) end
+            if id ~= 4 then print('\t\t\t\tReceived ' .. id) end
             messageHandler[id](self, peer, ...)
           end)
         end
@@ -434,5 +409,45 @@ function Torrent:pipeInterested()
   end
 end
 
+
+function Torrent:requestPieces(peer)
+  -- Find the rarest piece they have.  Insert all missing blocks for this piece
+  -- into the download queue.
+  
+  -- Make a copy of our rarity table and sort it by rarity so we can quickly iterate
+  -- over the most rare pieces in order.
+  -- This is disgusting and needs to be changed in the future. TODO
+  local sortedRarity = {}
+  for k, v in pairs(self.rarity) do
+    table.insert(sortedRarity, {piece = k, rarity = v})
+  end
+  table.sort(sortedRarity, function(a, b) return a.rarity < b.rarity end)
+  
+  local i
+  local requests = {}
+  for i = 1, #sortedRarity do
+    local piece = sortedRarity[i].piece
+    if peer.pieces[piece] == 1 and self.missing[piece] and #self.missing[piece] > 0 then
+      while #self.missing[piece] > 0 do
+        local block = self.missing[piece][1]
+        local req = Request:new(piece, block, 16384, peer)
+        table.remove(self.missing[piece], 1)
+        table.insert(requests, req)
+      end
+      
+      break
+    end
+  end
+  
+  if #requests == 0 then return false end
+  
+  local i
+  for i = 1, #requests do
+    self.downloadQueue:add(requests[i], requests[i].length)
+    requests[i].peer.numWant = requests[i].peer.numWant + 1
+  end
+  
+  return true
+end
 
 return Torrent

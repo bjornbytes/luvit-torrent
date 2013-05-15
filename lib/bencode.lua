@@ -1,3 +1,5 @@
+local table = require('table')
+
 local orderedPairs = require('./util').orderedPairs
 
 local bencode = {}
