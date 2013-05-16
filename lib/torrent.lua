@@ -48,36 +48,9 @@ function Torrent:initialize(location)
   self.remoteLeech = 0
   self.remotePending = 0
   self.remoteSeed = 0
-  
-  -- Cache 4,000 blocks.
-  self.content = Cache:new(128, function(key, callback)
-    print('Fetching')
-    local piece, block = key:sub(1, key:find(':') - 1), key:sub(key:find(':') + 1)
-    local stream = fs.createReadStream(self.metainfo.info.name, {
-      offset = (piece * self.metainfo.info['piece length']) + (block * 16384),
-      length = 16384
-    })
-    local data = ''
-    stream:on('data', function(chunk)
-      data = data .. chunk
-    end)
-    stream:on('end', function()
-      callback(data)
-      stream:close()
-    end)
-  end, function(key, val, done)
-    print('Evicting')
-    local piece, block = key:sub(1, key:find(':') - 1), key:sub(key:find(':') + 1)
-    
-    -- Luvit doesn't have asynchronous write streams :[ TODO
-    local stream = fs.createWriteStream(self.metainfo.info.name .. '.part', {
-      flags = 'r+',
-      offset = (piece * self.metainfo.info['piece length']) + (block * 16384)
-    })
-    stream:write(val)
-    stream:close()
-    done()
-  end)
+
+  -- Memory-store for all in-progress pieces (possibly introduce caching system).
+  self.content = {}
 end
 
 
@@ -110,20 +83,13 @@ function Torrent:readMetainfo(callback)
     -- Initialize datastructures used in representing information about pieces.
     for i = 0, self.pieceCount - 1 do
       self.rarity[i] = 0
+      self.content[i] = {}
       self.missing[i] = {}
       local j
       for j = 0, self.blockCount - 1 do
         table.insert(self.missing[i], j)
       end
     end
-    
-    -- Create an empty .part file to write blocks to.
-    local stream = fs.createWriteStream(self.metainfo.info.name .. '.part', {
-      flags = 'w',
-      offset = 0
-    })
-    stream:write(string.rep('0', self.metainfo.info.length))
-    stream:close()
     
     if callback then callback() end
   end
@@ -175,8 +141,8 @@ local messageHandler = {
     -- If we were about to request pieces and they choke us, put them back in the pool.
     local i
     for i = 1, #self.downloadQueue.queue do
-      if self.downloadQueue.queue[i].obj.peer == peer then
-        local req = self.downloadQueue.queue[i]
+      local req = self.downloadQueue.queue[i].obj
+      if req and req.peer == peer then
         table.insert(self.missing[req.piece], req.block)
         table.remove(self.downloadQueue.queue, i)
         i = i - 1
@@ -255,66 +221,45 @@ local messageHandler = {
     end
   end,
   
-  [7] = function(self, peer, piece, block, body)
+  [7] = function(self, peer, piece, offset, body)
+    local block = offset / 16384
     
     local key = tostring(piece) .. ':' .. tostring(block)
     print('Got piece ' .. key)
-    self.content:set(key, body)
+    self.content[piece][block] = body
+    
+    -- Check to see if this block completes the piece (can probably be optimized).
+    local complete = true
+
+    for i = 0, self.blockCount - 1 do
+      if self.content[piece][i] == nil then complete = false break end
+    end
+    
+    -- Hash check and write out the piece if we finished it.
+    if complete == true then
+      local pieceData = table.concat(self.content[piece], '', 0, self.blockCount - 1)
+      
+      if self:hashCheck(piece, pieceData) == false then
+        debug('Hash check failed for piece ' .. piece)
+        return
+      else
+        self:writePiece(piece, pieceData)
+        
+        self.missing[piece] = nil
+        
+        -- Send haves to everyone.
+        for _, v in pairs(self.peers) do
+          v:send(4, piece)
+        end
+        
+        self.content[piece] = nil
+      end
+    end
     
     for i = 1, #peer.pending do
       if peer.pending[i].piece == piece and peer.pending[i].block == block then
         table.remove(peer.pending[i])
         break
-      end
-    end
-    
-    -- Check to see if this block completes the piece (can probably be optimized).
-    local complete = true
-
-    -- See if we have queued up another request for a part of this piece.
-    for i = 1, #self.downloadQueue.queue do
-      local req = self.downloadQueue.queue[i].obj
-      if req.piece == piece then complete = false break end
-    end
-      
-    -- See if we've asked a peer for a part of this piece.
-    if complete then
-      for _, v in pairs(self.peers) do
-        for i = 1, #v.pending do
-          if v.pending[i].piece == piece then complete = false break end
-        end
-      end
-    end
-    
-    -- Hash check and write out the piece if we finished it.
-    if complete == true then
-      print('complete lol')
-      local blocks = {}
-      local ct = 0
-      for i = 0, self.blockCount - 1 do
-        local key = tostring(piece) .. ':' .. tostring(i)
-        self.content:get(key, function(val)
-          blocks[i] = val
-          ct = ct + 1
-          if ct == self.blockCount then
-            local pieceData = table.concat(blocks)
-            
-            if self:hashCheck(piece, pieceData) == false then
-              debug('Hash check failed for piece ' .. piece)
-              return
-            else
-              self:writePiece(piece, pieceData)
-              print('Finished piece ' .. piece .. '!')
-              
-              self.missing[piece] = nil
-              
-              -- Send haves to everyone.
-              for _, v in pairs(self.peers) do
-                v:send(4, piece)
-              end
-            end
-          end
-        end)
       end
     end
     
@@ -448,7 +393,7 @@ function Torrent:requestPieces(peer)
     if peer.pieces[piece] == 1 and self.missing[piece] and #self.missing[piece] > 0 then
       while #self.missing[piece] > 0 do
         local block = self.missing[piece][1]
-        local req = Request:new(piece, block, 16384, peer)
+        local req = Request:new(piece, block * 16384, 16384, peer)
         table.remove(self.missing[piece], 1)
         table.insert(requests, req)
       end
@@ -474,10 +419,8 @@ function Torrent:hashCheck(piece, content)
   local hashed = sha1.hash(content):gsub('(%w%w)', function(x)
     return string.char(tonumber(x, 16))
   end)
-
-  print(hashed .. ' VS ' .. self.metainfo.info.pieces:sub(piece * 20, (piece * 20) + 20))
   
-  return hashed == self.metainfo.info.pieces:sub(piece * 20, (piece * 20) + 20)
+  return hashed == self.metainfo.info.pieces:sub((piece * 20) + 1, (piece * 20) + 20)
 end
 
 
@@ -486,10 +429,10 @@ function Torrent:writePiece(piece, content)
   -- Write out piece data.
   -- Luvit doesn't have asynchronous write streams :[ TODO
   local stream = fs.createWriteStream(self.metainfo.info.name .. '.part', {
-    flags = 'r+',
-    offset = piece * self.metainfo.info['piece length']
+    flags = 'r+'
   })
-  stream:write(pieceData)
+  stream.offset = piece * self.metainfo.info['piece length']
+  stream:write(content)
   stream:close()
 end
 
