@@ -428,12 +428,40 @@ end
 function Torrent:writePiece(piece, content)
   -- Write out piece data.
   -- Luvit doesn't have asynchronous write streams :[ TODO
-  local stream = fs.createWriteStream(self.metainfo.info.name .. '.part', {
-    flags = 'r+'
-  })
-  stream.offset = piece * self.metainfo.info['piece length']
-  stream:write(content)
-  stream:close()
+  local offset = piece * self.metainfo.info['piece length']
+  
+  if self.metainfo.info.length then
+    local stream = fs.createWriteStream(self.metainfo.info.name, {
+      flags = 'r+'
+    })
+    stream.offset = offset
+    stream:write(content)
+    stream:close()
+  else
+    local bytes = #content
+    for _, file in ipairs(self.metainfo.info.files) do
+      if offset > file.length then
+        offset = offset - file.length
+      else
+        local path = self.metainfo.info.name .. '/' .. table.concat(file.path, '/')
+        local stream = fs.createWriteStream(path, {
+          flags = 'r+'
+        })
+        stream.offset = offset
+        
+        if bytes < file.length then  
+          stream:write(content)
+          stream:close()
+          break
+        else
+          local chunkSize = file.length - offset
+          stream:write(content:sub(1, chunkSize))
+          stream:close()
+          bytes = bytes - chunkSize
+          content = content:sub(chunkSize + 1)
+        end
+      end
+    end
 end
 
 return Torrent
