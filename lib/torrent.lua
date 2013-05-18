@@ -71,6 +71,12 @@ function Torrent:destroy()
   for _, tracker in pairs(self.trackers) do
     self:announce(tracker, 'stopped')
   end
+  
+  for piece = 1, #self.content do
+    for block, data in pairs(self.content[piece]) do
+      self:writePiece(piece, data, block)
+    end
+  end
 end
 
 
@@ -437,11 +443,12 @@ function Torrent:hashCheck(piece, content)
 end
 
 
--- Writes out the data for the piece.
-function Torrent:writePiece(piece, content)
+-- Writes out the data for the piece or block (specified by block).
+function Torrent:writePiece(piece, content, block)
   -- Write out piece data.
   -- Luvit doesn't have asynchronous write streams :[ TODO
   local offset = piece * self.metainfo.info['piece length']
+  if block then offset = offset + (16384 * block) end
   
   if self.metainfo.info.length then
     local stream = fs.createWriteStream(self.metainfo.info.name, {
