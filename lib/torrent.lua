@@ -51,13 +51,26 @@ function Torrent:initialize(location)
 
   -- Memory-store for all in-progress pieces (possibly introduce caching system).
   self.content = {}
+  
+  process:on('exit', function() self:destroy() end)
 end
 
 
 -- Destroys the torrent gracefully, closing any connections and writing out any
 -- data.
 function Torrent:destroy()
-  -- Eheh
+  
+  -- Close connections with all peers.
+  if peers then
+    for _, v in pairs(self.peers) do
+      peer.connection:destroy()
+    end
+  end
+  
+  -- Emit a stopped event to all trackers.
+  for _, tracker in pairs(self.trackers) do
+    self:announce(tracker, 'stopped')
+  end
 end
 
 
@@ -462,6 +475,7 @@ function Torrent:writePiece(piece, content)
         end
       end
     end
+  end
 end
 
 return Torrent

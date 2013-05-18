@@ -34,22 +34,27 @@ function Tracker:announce(options, callback)
   local url = self.url
   url = url .. '?info_hash=' .. urlEncode(options.infoHash)
   url = url .. '&peer_id=' .. urlEncode(options.peerId)
-  url = url .. '&port=' .. options.port
-  url = url .. '&uploaded=' .. options.uploaded
-  url = url .. '&downloaded=' .. options.downloaded
-  url = url .. '&left=' .. options.left
+  if options.event ~= 'stopped' then
+    url = url .. '&port=' .. options.port
+    url = url .. '&uploaded=' .. options.uploaded
+    url = url .. '&downloaded=' .. options.downloaded
+    url = url .. '&left=' .. options.left
+    url = url .. '&compact=1'
+  end
   if options.event then
     url = url .. '&event=' .. options.event
   end
-  url = url .. '&compact=1'
   
   print('Announcing to ' .. url)
   
   http.get(url, function(res)
+    if options.event == 'stopped' then return end
+    
     local data = ''
     
     res:on('data', function(chunk) data = data .. chunk end)
     res:on('end', function()
+      
       peers = {}
       
       local response = bencode.decode(data)
