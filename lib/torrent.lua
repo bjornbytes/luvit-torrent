@@ -72,6 +72,7 @@ function Torrent:destroy()
     self:announce(tracker, 'stopped')
   end
   
+  -- Write out partially complete pieces.
   for piece = 1, #self.content do
     for block, data in pairs(self.content[piece]) do
       self:writePiece(piece, data, block)
@@ -137,7 +138,7 @@ function Torrent:initTrackers()
     table.insert(self.trackers, Tracker:new(self.metainfo.announce))
   end
   
-  if self.metainfo.announceList then
+  if self.metainfo['announce_list'] then
     for _, v in ipairs(self.metainfo.announceList) do
       table.insert(self.trackers, Tracker:new(v))
     end
